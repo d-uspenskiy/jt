@@ -16,7 +16,11 @@ public class ThreadExecutor implements Executor, AutoCloseable {
   private Object lock_ = new Object();
 
   public ThreadExecutor() {
-    thread_ = new Thread(this::process);
+    this(null);
+  }
+
+  public ThreadExecutor(String name) {
+    thread_ = new Thread(this::process, name);
     thread_.start();
   }
 
