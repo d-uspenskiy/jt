@@ -3,34 +3,34 @@ package com.duspensky.jutils;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Map;
+import java.util.function.Consumer;
+import java.lang.reflect.Method;
 
 import com.duspensky.jutils.common.ThreadExecutor;
+import com.duspensky.jutils.rmqrmi.BaseSerializer;
+import com.duspensky.jutils.rmqrmi.EventInterface;
 import com.duspensky.jutils.rmqrmi.Gateway;
 import com.duspensky.jutils.rmqrmi.GatewayBuilder;
 import com.duspensky.jutils.rmqrmi.Serializer;
+import com.duspensky.jutils.rmqrmi.Exceptions.BadInterface;
 import com.duspensky.jutils.rmqrmi.Exceptions.BadSerialization;
 
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static com.duspensky.jutils.common.Misc.makePair;
+
 public class TestIntegral {
   private static final Logger LOG = LoggerFactory.getLogger(TestIntegral.class);
-  private static final String GATEWAY_MAIN_THREAD = "gateway-main";
 
-  public interface IBasicOperations {
-    Integer sum(Integer a, Integer b);
-  }
-
-  public interface IOperations extends IBasicOperations {
-    Integer mul(Integer a, Integer b);
-    Integer div(Integer a, Integer b);
-  }
-
-  private static class SimpleStringSerializer extends Serializer {
+  private static class SimpleStringSerializer extends BaseSerializer {
     @Override
     public byte[] serialize(Object[] objs) {
-      checkThread();
       StringBuilder builder = new StringBuilder();
       for (Object o : objs) {
         builder.append(o.toString());
@@ -45,7 +45,6 @@ public class TestIntegral {
 
     @Override
     public Object[] deserialize(Class<?>[] cls, byte[] data) throws BadSerialization {
-      checkThread();
       String val = new String(data);
       String[] items = val.split("#");
       if (items.length != cls.length) {
@@ -63,63 +62,118 @@ public class TestIntegral {
       }
       return result;
     }
-
-    private void checkThread() {
-      if (Thread.currentThread().getName().equals(GATEWAY_MAIN_THREAD)) {
-        throw new RuntimeException("Serialization is called in context of gateway thread");
-      }
-    }
   }
 
-  private static class Operations implements IOperations {
-    private String expectedThreadPrefix_;
+  public interface BasicOperations {
+    Integer sum(Integer a, Integer b);
+  }
 
-    public Operations(String expectedThreadPrefix) {
-      expectedThreadPrefix_ = expectedThreadPrefix;
-    }
+  public interface Operations extends BasicOperations {
+    Integer mul(Integer a, Integer b);
+    Integer div(Integer a, Integer b);
+  }
+  @EventInterface
+  public interface Notification {
+    void onNewResult(Integer value);
+  }
 
+  private static class OperationsImpl implements Operations {
     @Override
     public Integer sum(Integer a, Integer b) {
-      checkThread();
       return a + b;
     }
 
     @Override
     public Integer mul(Integer a, Integer b) {
-      checkThread();
       return a * b;
     }
 
     @Override
     public Integer div(Integer a, Integer b) {
-      checkThread();
       return a / b;
     }
+  }
 
-    private void checkThread() {
-      String threadName = Thread.currentThread().getName();
-      if (!threadName.startsWith(expectedThreadPrefix_)) {
-        throw new RuntimeException(String.format(
-            "Executed in context of wrong thread '%s', but '%s' prefix is expected",
-            threadName, expectedThreadPrefix_));
-      }
+  private static class NotificationImpl implements Notification {
+    private ArrayList<Integer> results_;
+
+    public NotificationImpl(ArrayList<Integer> results) {
+      results_ = results;
+    }
+
+    @Override
+    public void onNewResult(Integer value) {
+      results_.add(value);
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private static <T> T callCheckWrapper(Class<T> cl, T obj, Runnable checker) {
+    return (T) Proxy.newProxyInstance(
+        cl.getClassLoader(), new Class[]{cl}, (Object proxy, Method method, Object[] args) -> {
+          checker.run();
+          return method.invoke(obj, args);
+        });
+  }
+
+  private static class Registrator {
+    private Runnable checker_;
+
+    public Registrator(Runnable checker) {
+      checker_ = checker;
+    }
+
+    public <T> Registrator register(Gateway gw, Class<T> iface, T impl) throws BadInterface {
+      gw.registerImplementation(iface, callCheckWrapper(iface, impl, checker_));
+      return this;
     }
   }
 
   @Test
   public void basicInvocation() throws Exception {
     final String workerThreadName = "gateway-worker";
-    try (ThreadExecutor ex = new ThreadExecutor(workerThreadName);
-         Gateway gw = new GatewayBuilder()
-                        .setExecutor(ex)
-                        .setSerializer(new SimpleStringSerializer())
-                        .setMainThreadName(GATEWAY_MAIN_THREAD)
-                        .build()) {
-      gw.register(IOperations.class, new Operations(workerThreadName));
-      IOperations service = gw.stub(IOperations.class);
-      assertEquals(10, service.mul(2, 5));
-      assertEquals(5, service.sum(3, 2));
-      assertEquals(3, service.div(15, 5));
+    final String gatewayThreadName = "gateway-main";
+
+    Runnable workerThreadChecker = () -> {
+      String threadName = Thread.currentThread().getName();
+      if (!threadName.equals(workerThreadName)) {
+        throw new RuntimeException(String.format(
+            "Executed in context of wrong thread '%s', but '%s' is expected", threadName, workerThreadName));
+      }
+    };
+    Runnable nonGatewayTreadChecker = () -> {
+      if (Thread.currentThread().getName().equals(gatewayThreadName)) {
+        throw new RuntimeException(String.format(
+            "Execution in context of '%s' thread is prohibited", gatewayThreadName));
+      }
+    };
+
+    try (ThreadExecutor ex = new ThreadExecutor(workerThreadName)) {
+      GatewayBuilder builder = new GatewayBuilder().setExecutor(ex)
+                                  .setSerializer(callCheckWrapper(Serializer.class,
+                                                                  new SimpleStringSerializer(),
+                                                                  nonGatewayTreadChecker))
+                                  .setMainThreadName(gatewayThreadName);
+      try (Gateway gw = builder.build();
+           Gateway extraGw = builder.build()) {
+        ArrayList<Integer> gwResult = new ArrayList<>();
+        ArrayList<Integer> extraGwResult = new ArrayList<>();
+        new Registrator(workerThreadChecker).register(gw, Operations.class, new OperationsImpl())
+                                            .register(gw, Notification.class, new NotificationImpl(gwResult))
+                                            .register(extraGw, Notification.class, new NotificationImpl(extraGwResult));
+        Operations opService = gw.buildClient(Operations.class);
+        Notification ntfService = gw.buildClient(Notification.class);
+        Consumer<Map.Entry<Integer,Integer>> resultForwarder = (val) -> {
+          assertEquals(val.getKey(), val.getValue());
+          ntfService.onNewResult(val.getKey());
+        };
+        resultForwarder.accept(makePair(10, opService.mul(2, 5)));
+        resultForwarder.accept(makePair(5, opService.sum(3, 2)));
+        resultForwarder.accept(makePair(3, opService.div(15, 5)));
+        opService.sum(1, 1);
+        assertEquals(Arrays.asList(new Integer[]{10, 5, 3}), extraGwResult);
+        assertEquals(gwResult, extraGwResult);
+      }
     }
   }
 }
