@@ -8,14 +8,13 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.zip.CRC32C;
 import java.util.zip.Checksum;
 
 import com.duspensky.jutils.common.CloseableHolder;
-import com.duspensky.jutils.common.ExecutorAsService;
 import com.duspensky.jutils.common.Misc;
-import com.duspensky.jutils.common.ThreadExecutor;
 import com.duspensky.jutils.common.Misc.FunctionWithException;
 import com.duspensky.jutils.common.Misc.RunnableWithException;
 import com.duspensky.jutils.rmqrmi.Exceptions.BadInterface;
@@ -39,33 +38,32 @@ final class GatewayImpl implements Gateway {
 
   private static final String REQUEST_EXCHANGE = "request";
 
-  private ThreadExecutor operationExecutor_;
-  private ExecutorService consumerExecutor_;
-  private Map<Map.Entry<String, String>, FunctionWithException<byte[], Object>> impls_ = new HashMap<>();
-  private Map<String, java.util.function.Consumer<byte[]>> requests_ = new HashMap<>();
-  private Config config_;
-  private ConnectionFactory factory_;
-  private Connection connection_;
-  private Channel channel_;
-  private String ownQueue_;
-  private long requestCounter_;
+  private ExecutorService operationExecutor;
+  private Map<Map.Entry<String, String>, FunctionWithException<byte[], Object>> impls = new HashMap<>();
+  private Map<String, java.util.function.Consumer<byte[]>> requests = new HashMap<>();
+  private Config config;
+  private ConnectionFactory factory;
+  private Connection connection;
+  private Channel channel;
+  private String ownQueue;
+  private long requestCounter;
 
-  GatewayImpl(Config config, String threadName) {
-    operationExecutor_ = new ThreadExecutor(ObjectUtils.firstNonNull(threadName, "gateway-main"));
-    consumerExecutor_ = new ExecutorAsService(operationExecutor_);
-    config_ = config;
-    factory_ = new ConnectionFactory();
-    factory_.setHost(config_.host);
-    factory_.setPort(config_.port);
-    factory_.setVirtualHost(config_.vHost);
-    factory_.setSharedExecutor(consumerExecutor_);
+  GatewayImpl(Config cfg, String threadName) {
+    operationExecutor = Misc.namedThreadExecutor(ObjectUtils.firstNonNull(threadName, "gateway-main"));
+    config = cfg;
+    factory = new ConnectionFactory();
+    factory.setHost(config.host);
+    factory.setPort(config.port);
+    factory.setVirtualHost(config.vHost);
+    factory.setSharedExecutor(operationExecutor);
     reconnect();
   }
 
   @Override
   public void close() throws Exception {
     run(this::closeImpl);
-    operationExecutor_.close();
+    Misc.waitAllOperationsProcessed(operationExecutor);
+    Misc.shutdown(operationExecutor);
   }
 
   @Override
@@ -83,7 +81,7 @@ final class GatewayImpl implements Gateway {
       methodDescriptors.put(method, Misc.makePair(fullName(method), method.getReturnType()));
     }
     String iName = ifaceName(iface);
-    Serializer serial = config_.serializer;
+    Serializer serial = config.serializer;
     boolean oneWay = isEventInterface(iface);
     return (T) Proxy.newProxyInstance(
         iface.getClassLoader(), new Class[]{iface},
@@ -117,18 +115,18 @@ final class GatewayImpl implements Gateway {
   }
 
   private void run(Runnable operation) {
-    operationExecutor_.execute(operation);
+    operationExecutor.execute(operation);
   }
 
   private void reconnectImpl() throws Exception {
     LOG.debug("reconnectImpl");
     closeImpl();
-    try (CloseableHolder<Connection> connHolder = new CloseableHolder<>(factory_.newConnection());
+    try (CloseableHolder<Connection> connHolder = new CloseableHolder<>(factory.newConnection());
          CloseableHolder<Channel> chHolder = new CloseableHolder<>(connHolder.get().createChannel())){
-      Channel channel = chHolder.get();
-      String queue = channel.queueDeclare().getQueue();
-      channel.exchangeDeclare(REQUEST_EXCHANGE, BuiltinExchangeType.DIRECT);
-      channel.basicConsume(queue, new Consumer() {
+      Channel ch = chHolder.get();
+      String queue = ch.queueDeclare().getQueue();
+      ch.exchangeDeclare(REQUEST_EXCHANGE, BuiltinExchangeType.DIRECT);
+      ch.basicConsume(queue, new Consumer() {
         @Override
         public void handleConsumeOk(String consumerTag) {
           // TODO Auto-generated method stub
@@ -149,8 +147,8 @@ final class GatewayImpl implements Gateway {
         @Override
         public void handleDelivery(
           String consumerTag, Envelope envelope, BasicProperties properties, byte[] body) throws IOException {
-          if (config_.corellator != null) {
-            config_.corellator.setCorellationId(properties.getCorrelationId());
+          if (config.corellator != null) {
+            config.corellator.setCorellationId(properties.getCorrelationId());
           }
           String exchangeName = envelope.getExchange();
           if (exchangeName.isEmpty()) {
@@ -173,30 +171,29 @@ final class GatewayImpl implements Gateway {
 
         }
       });
-      connection_ = connHolder.release();
-      channel_ = chHolder.release();
-      ownQueue_ = queue;
+      connection = connHolder.release();
+      channel = chHolder.release();
+      ownQueue = queue;
     }
   }
 
   private void closeImpl() {
     LOG.debug("closeImpl");
-    Misc.silentClose(channel_);
-    Misc.silentClose(connection_);
-    connection_ = null;
-    channel_ = null;
-    ownQueue_ = null;
+    Misc.silentClose(connection);
+    connection = null;
+    channel = null;
+    ownQueue = null;
   }
 
   private void registerImpl(Class<?> iface, Object impl) throws BadInterface, IOException {
     String iName = ifaceName(iface);
     LOG.info("Registering {} as {}", impl.getClass(), iName);
     Map<Map.Entry<String, String>, FunctionWithException<byte[], Object>> ifaceImpls = new HashMap<>();
-    Serializer serial = config_.serializer;
+    Serializer serial = config.serializer;
     for (Method method : iface.getMethods()) {
       String name = fullName(method);
       LOG.debug("Registering {} of {}", name, iName);
-      if (impls_.get(Misc.makePair(iName, name)) != null) {
+      if (impls.get(Misc.makePair(iName, name)) != null) {
         throw new BadInterface(String.format("Duplicate implementation of %s %s", iName, name));
       }
       final Class<?>[] cls = method.getParameterTypes();
@@ -204,10 +201,10 @@ final class GatewayImpl implements Gateway {
         return method.invoke(impl, serial.deserialize(cls, data));
       });
     }
-    impls_.putAll(ifaceImpls);
+    impls.putAll(ifaceImpls);
 
-    if (channel_ != null) {
-      channel_.queueBind(ownQueue_, REQUEST_EXCHANGE, ifaceName(iface));
+    if (channel != null) {
+      channel.queueBind(ownQueue, REQUEST_EXCHANGE, ifaceName(iface));
     }
   }
 
@@ -227,7 +224,7 @@ final class GatewayImpl implements Gateway {
   private void invokeRemoteOneWay(String ifaceName, String methodName, byte[] args) {
     LOG.debug("invokeRemoteOneWay {} on {}", methodName, ifaceName);
     runExceptional(() -> {
-      if (channel_ != null) {
+      if (channel != null) {
         sendRequest(null, ifaceName, methodName, args);
       }
     });
@@ -237,12 +234,12 @@ final class GatewayImpl implements Gateway {
     LOG.debug(
         "handleRequest iface={}, method={}, msgId={}, replyTo={} body_length={}", 
         ifaceName, methodName, msgId, replyTo, body.length);
-    config_.executor.execute(() -> {
+    config.executor.execute(() -> {
       // TODO: send response in case of exception
       try {
-        Object result = impls_.get(Misc.makePair(ifaceName, methodName)).apply(body);
+        Object result = impls.get(Misc.makePair(ifaceName, methodName)).apply(body);
         if (replyTo != null) {
-          byte[] response = config_.serializer.serialize(result);
+          byte[] response = config.serializer.serialize(result);
           runExceptional(() -> sendResponseImpl(replyTo, msgId, response));
         }
       } catch (Exception e) {
@@ -253,16 +250,16 @@ final class GatewayImpl implements Gateway {
 
   private void handleResponse(byte[] data, String msgId) {
     LOG.debug("handleResponse of length={} on msgId={}", data.length, msgId);
-    requests_.remove(msgId).accept(data);
+    requests.remove(msgId).accept(data);
   }
 
   private void invokeImpl(
       CompletableFuture<byte[]> future, String ifaceName, String methodName, byte[] args) throws BadInvocation {
-    if (channel_ == null) {
+    if (channel == null) {
       throw new BadInvocation("No connection with RMQ server");
     }
-    String messageId = Long.toString(++requestCounter_);
-    requests_.put(messageId, (byte[] data) -> {
+    String messageId = Long.toString(++requestCounter);
+    requests.put(messageId, (byte[] data) -> {
       try {
         future.complete(data);
       } catch (Exception e) {
@@ -278,17 +275,17 @@ final class GatewayImpl implements Gateway {
 
   private void sendRequest(String messageId, String ifaceName, String methodName, byte[] args) throws IOException {
     BasicProperties props = new BasicProperties.Builder()
-                                .replyTo(messageId == null ? null : ownQueue_)
+                                .replyTo(messageId == null ? null : ownQueue)
                                 .messageId(messageId)
                                 .appId(methodName)
                                 .build();
-    channel_.basicPublish(REQUEST_EXCHANGE, ifaceName, props, args);
+    channel.basicPublish(REQUEST_EXCHANGE, ifaceName, props, args);
   }
 
   private void sendResponseImpl(String queue, String msgId, byte[] data) throws IOException {
-    if (channel_ != null) {
+    if (channel != null) {
       LOG.debug("Sending response of length={} to msgId={}", data.length, msgId);
-      channel_.basicPublish("", queue, new BasicProperties.Builder().messageId(msgId).build(), data);
+      channel.basicPublish("", queue, new BasicProperties.Builder().messageId(msgId).build(), data);
     }
   }
 

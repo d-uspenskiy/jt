@@ -10,8 +10,8 @@ import java.util.Map;
 import java.util.function.Consumer;
 import java.lang.reflect.Method;
 
+import com.duspensky.jutils.common.ExecutorHolder;
 import com.duspensky.jutils.common.Misc;
-import com.duspensky.jutils.common.ThreadExecutor;
 import com.duspensky.jutils.rmqrmi.BaseSerializer;
 import com.duspensky.jutils.rmqrmi.EventInterface;
 import com.duspensky.jutils.rmqrmi.Gateway;
@@ -147,8 +147,8 @@ public class TestIntegral {
       }
     };
 
-    try (ThreadExecutor ex = new ThreadExecutor(workerThreadName)) {
-      GatewayBuilder builder = new GatewayBuilder().setExecutor(ex)
+    try (ExecutorHolder ex = new ExecutorHolder(Misc.namedThreadExecutor(workerThreadName))) {
+      GatewayBuilder builder = new GatewayBuilder().setExecutor(ex.get())
                                   .setSerializer(callCheckWrapper(Serializer.class,
                                                                   new SimpleStringSerializer(),
                                                                   nonGatewayTreadChecker))
