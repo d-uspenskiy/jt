@@ -2,7 +2,7 @@ package com.duspensky.jutils.rmqrmi;
 
 import java.util.concurrent.Executor;
 
-import com.duspensky.jutils.rmqrmi.Exceptions.BadConfig;
+import org.apache.commons.lang3.Validate;
 
 public final class GatewayBuilder {
   private String host_ = "localhost";
@@ -13,12 +13,8 @@ public final class GatewayBuilder {
   private Corellator corellator_;
   private String mainThreadName_;
 
-  public GatewayBuilder setHost(String host) throws BadConfig {
-    if (host == null) {
-      throw new BadConfig("Host can't be null");
-    }
-
-    this.host_ = host;
+  public GatewayBuilder setHost(String host) {
+    this.host_ = Validate.notNull(host);
     return this;
   }
 
@@ -27,30 +23,18 @@ public final class GatewayBuilder {
     return this;
   }
 
-  public GatewayBuilder setVHost(String vHost) throws BadConfig {
-    if (vHost == null) {
-      throw new BadConfig("vHost can't be null");
-    }
-
-    this.vHost_ = vHost;
+  public GatewayBuilder setVHost(String vHost) {
+    this.vHost_ = Validate.notNull(vHost);
     return this;
   }
 
-  public GatewayBuilder setExecutor(Executor executor) throws BadConfig {
-    if (executor == null) {
-      throw new BadConfig("Executor can't be null");
-    }
-
-    this.executor_ = executor;
+  public GatewayBuilder setExecutor(Executor executor) {
+    this.executor_ = Validate.notNull(executor);
     return this;
   }
 
-  public GatewayBuilder setSerializer(Serializer serializer) throws BadConfig {
-    if (serializer == null) {
-      throw new BadConfig("Serializer can't be null");
-    }
-
-    this.serializer_ = serializer;
+  public GatewayBuilder setSerializer(Serializer serializer) {
+    this.serializer_ = Validate.notNull(serializer);
     return this;
   }
 
@@ -64,16 +48,9 @@ public final class GatewayBuilder {
     return this;
   }
 
-  public Gateway build() throws BadConfig {
-    if (executor_ == null) {
-      throw new BadConfig("Executor can't be null");
-    }
-
-    if (serializer_ == null) {
-      throw new BadConfig("Serializer can't be null");
-    }
-
+  public Gateway build() {
     return new GatewayImpl(
-        new Config(host_, port_, vHost_, executor_, serializer_, corellator_), mainThreadName_);
+        new Config(host_, port_, vHost_, Validate.notNull(executor_), Validate.notNull(serializer_), corellator_),
+        mainThreadName_);
   }
 }

@@ -20,7 +20,10 @@ public class ThreadExecutor implements Executor, AutoCloseable {
   }
 
   public ThreadExecutor(String name) {
-    thread_ = new Thread(this::process, name);
+    thread_ = new Thread(this::process);
+    if (name != null) {
+      thread_.setName(name);
+    }
     thread_.start();
   }
 

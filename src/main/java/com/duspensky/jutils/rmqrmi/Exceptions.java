@@ -12,12 +12,6 @@ public interface Exceptions {
     Common(Throwable cause) { super(cause); }
   }
 
-  public static class BadConfig extends Common {
-    private static final long serialVersionUID = -8063865182726125902L;
-
-    public BadConfig(String message) { super(message); }
-  }
-
   public static class BadInterface extends Common {
     private static final long serialVersionUID = 6584605744637459610L;
 

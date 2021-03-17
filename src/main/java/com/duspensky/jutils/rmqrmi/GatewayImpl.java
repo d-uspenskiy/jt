@@ -9,11 +9,12 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeoutException;
 import java.util.zip.CRC32C;
 import java.util.zip.Checksum;
 
+import com.duspensky.jutils.common.CloseableHolder;
 import com.duspensky.jutils.common.ExecutorAsService;
+import com.duspensky.jutils.common.Misc;
 import com.duspensky.jutils.common.ThreadExecutor;
 import com.duspensky.jutils.common.Misc.FunctionWithException;
 import com.duspensky.jutils.common.Misc.RunnableWithException;
@@ -28,9 +29,6 @@ import com.rabbitmq.client.Consumer;
 import com.rabbitmq.client.Envelope;
 import com.rabbitmq.client.ShutdownSignalException;
 import com.rabbitmq.client.AMQP.BasicProperties;
-
-import static com.duspensky.jutils.common.Misc.silentClose;
-import static com.duspensky.jutils.common.Misc.makePair;
 
 import org.apache.commons.lang3.ObjectUtils;
 import org.slf4j.Logger;
@@ -82,7 +80,7 @@ final class GatewayImpl implements Gateway {
     checkIfaceIsAcceptable(iface);
     Map<Method, Map.Entry<String, Class<?>>> methodDescriptors = new HashMap<>();
     for (Method method : iface.getMethods()) {
-      methodDescriptors.put(method, makePair(fullName(method), method.getReturnType()));
+      methodDescriptors.put(method, Misc.makePair(fullName(method), method.getReturnType()));
     }
     String iName = ifaceName(iface);
     Serializer serial = config_.serializer;
@@ -122,14 +120,12 @@ final class GatewayImpl implements Gateway {
     operationExecutor_.execute(operation);
   }
 
-  private void reconnectImpl() throws IOException, TimeoutException {
+  private void reconnectImpl() throws Exception {
     LOG.debug("reconnectImpl");
     closeImpl();
-    Connection connection = null;
-    Channel channel = null;
-    try {
-      connection = factory_.newConnection();
-      channel = connection.createChannel();
+    try (CloseableHolder<Connection> connHolder = new CloseableHolder<>(factory_.newConnection());
+         CloseableHolder<Channel> chHolder = new CloseableHolder<>(connHolder.get().createChannel())){
+      Channel channel = chHolder.get();
       String queue = channel.queueDeclare().getQueue();
       channel.exchangeDeclare(REQUEST_EXCHANGE, BuiltinExchangeType.DIRECT);
       channel.basicConsume(queue, new Consumer() {
@@ -177,21 +173,16 @@ final class GatewayImpl implements Gateway {
 
         }
       });
-      connection_ = connection;
-      channel_ = channel;
+      connection_ = connHolder.release();
+      channel_ = chHolder.release();
       ownQueue_ = queue;
-      connection = null;
-      channel = null;
-    } finally {
-      silentClose(channel);
-      silentClose(connection);
     }
   }
 
   private void closeImpl() {
     LOG.debug("closeImpl");
-    silentClose(channel_);
-    silentClose(connection_);
+    Misc.silentClose(channel_);
+    Misc.silentClose(connection_);
     connection_ = null;
     channel_ = null;
     ownQueue_ = null;
@@ -205,11 +196,11 @@ final class GatewayImpl implements Gateway {
     for (Method method : iface.getMethods()) {
       String name = fullName(method);
       LOG.debug("Registering {} of {}", name, iName);
-      if (impls_.get(makePair(iName, name)) != null) {
+      if (impls_.get(Misc.makePair(iName, name)) != null) {
         throw new BadInterface(String.format("Duplicate implementation of %s %s", iName, name));
       }
       final Class<?>[] cls = method.getParameterTypes();
-      ifaceImpls.put(makePair(iName, name), (byte[] data) -> {
+      ifaceImpls.put(Misc.makePair(iName, name), (byte[] data) -> {
         return method.invoke(impl, serial.deserialize(cls, data));
       });
     }
@@ -249,7 +240,7 @@ final class GatewayImpl implements Gateway {
     config_.executor.execute(() -> {
       // TODO: send response in case of exception
       try {
-        Object result = impls_.get(makePair(ifaceName, methodName)).apply(body);
+        Object result = impls_.get(Misc.makePair(ifaceName, methodName)).apply(body);
         if (replyTo != null) {
           byte[] response = config_.serializer.serialize(result);
           runExceptional(() -> sendResponseImpl(replyTo, msgId, response));

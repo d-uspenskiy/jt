@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 import java.lang.reflect.Method;
 
+import com.duspensky.jutils.common.Misc;
 import com.duspensky.jutils.common.ThreadExecutor;
 import com.duspensky.jutils.rmqrmi.BaseSerializer;
 import com.duspensky.jutils.rmqrmi.EventInterface;
@@ -22,8 +23,6 @@ import com.duspensky.jutils.rmqrmi.Exceptions.BadSerialization;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import static com.duspensky.jutils.common.Misc.makePair;
 
 public class TestIntegral {
   private static final Logger LOG = LoggerFactory.getLogger(TestIntegral.class);
@@ -167,9 +166,9 @@ public class TestIntegral {
           assertEquals(val.getKey(), val.getValue());
           ntfService.onNewResult(val.getKey());
         };
-        resultForwarder.accept(makePair(10, opService.mul(2, 5)));
-        resultForwarder.accept(makePair(5, opService.sum(3, 2)));
-        resultForwarder.accept(makePair(3, opService.div(15, 5)));
+        resultForwarder.accept(Misc.makePair(10, opService.mul(2, 5)));
+        resultForwarder.accept(Misc.makePair(5, opService.sum(3, 2)));
+        resultForwarder.accept(Misc.makePair(3, opService.div(15, 5)));
         opService.sum(1, 1);
         assertEquals(Arrays.asList(new Integer[]{10, 5, 3}), extraGwResult);
         assertEquals(gwResult, extraGwResult);
