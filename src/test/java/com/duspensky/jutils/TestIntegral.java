@@ -7,6 +7,7 @@ import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.lang.reflect.Method;
 
@@ -116,14 +117,16 @@ public class TestIntegral {
   }
 
   private static class Registrator {
-    private Runnable checker_;
+    private Runnable checker;
+    private Executor executor;
 
-    public Registrator(Runnable checker) {
-      checker_ = checker;
+    public Registrator(Runnable c, Executor e) {
+      checker = c;
+      executor = e;
     }
 
     public <T> Registrator register(Gateway gw, Class<T> iface, T impl) throws BadInterface {
-      gw.registerImplementation(iface, callCheckWrapper(iface, impl, checker_));
+      gw.registerImplementation(iface, callCheckWrapper(iface, impl, checker), executor);
       return this;
     }
   }
@@ -148,18 +151,17 @@ public class TestIntegral {
     };
 
     try (ExecutorHolder ex = new ExecutorHolder(Misc.namedThreadExecutor(workerThreadName))) {
-      GatewayBuilder builder = new GatewayBuilder().setExecutor(ex.get())
-                                  .setSerializer(callCheckWrapper(Serializer.class,
-                                                                  new SimpleStringSerializer(),
-                                                                  nonGatewayTreadChecker))
-                                  .setMainThreadName(gatewayThreadName);
+      GatewayBuilder builder = new GatewayBuilder(
+          callCheckWrapper(Serializer.class, new SimpleStringSerializer(), nonGatewayTreadChecker))
+          .setMainThreadName(gatewayThreadName);
       try (Gateway gw = builder.build();
            Gateway extraGw = builder.build()) {
         ArrayList<Integer> gwResult = new ArrayList<>();
         ArrayList<Integer> extraGwResult = new ArrayList<>();
-        new Registrator(workerThreadChecker).register(gw, Operations.class, new OperationsImpl())
-                                            .register(gw, Notification.class, new NotificationImpl(gwResult))
-                                            .register(extraGw, Notification.class, new NotificationImpl(extraGwResult));
+        new Registrator(workerThreadChecker, ex.get())
+            .register(gw, Operations.class, new OperationsImpl())
+            .register(gw, Notification.class, new NotificationImpl(gwResult))
+            .register(extraGw, Notification.class, new NotificationImpl(extraGwResult));
         Operations opService = gw.buildClient(Operations.class);
         Notification ntfService = gw.buildClient(Notification.class);
         Consumer<Map.Entry<Integer,Integer>> resultForwarder = (val) -> {

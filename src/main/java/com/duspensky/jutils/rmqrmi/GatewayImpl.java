@@ -7,19 +7,18 @@ import java.lang.reflect.Proxy;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.zip.CRC32C;
 import java.util.zip.Checksum;
 
 import com.duspensky.jutils.common.CloseableHolder;
 import com.duspensky.jutils.common.Misc;
-import com.duspensky.jutils.common.Misc.FunctionWithException;
 import com.duspensky.jutils.common.Misc.RunnableWithException;
 import com.duspensky.jutils.rmqrmi.Exceptions.BadInterface;
 import com.duspensky.jutils.rmqrmi.Exceptions.BadInvocation;
-
+import com.duspensky.jutils.rmqrmi.ImplementationRegistrator.NameProvider;
 import com.rabbitmq.client.BuiltinExchangeType;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
@@ -33,13 +32,36 @@ import org.apache.commons.lang3.ObjectUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-final class GatewayImpl implements Gateway {
+class GatewayImpl implements Gateway {
   private static final Logger LOG = LoggerFactory.getLogger(GatewayImpl.class);
 
   private static final String REQUEST_EXCHANGE = "request";
 
+  private static class NameProviderImpl implements NameProvider {
+
+    @Override
+    public String getName(Class<?> iface) {
+      return iface.getCanonicalName();
+    }
+
+    @Override
+    public String getName(Method method) {
+      StringBuilder builder = new StringBuilder();
+      builder.append(method.getName());
+      builder.append("#");
+      Checksum crc32 = new CRC32C();
+      crc32.update(method.getReturnType().getCanonicalName().getBytes());
+      for (Class<?> p : method.getParameterTypes()) {
+        crc32.update(p.getCanonicalName().getBytes());
+      }
+      builder.append(crc32.getValue());
+      return builder.toString();
+    }
+  }
+
   private ExecutorService operationExecutor;
-  private Map<Map.Entry<String, String>, FunctionWithException<byte[], Object>> impls = new HashMap<>();
+  private NameProvider nameProvider;
+  private ImplementationRegistrator impls;
   private Map<String, java.util.function.Consumer<byte[]>> requests = new HashMap<>();
   private Config config;
   private ConnectionFactory factory;
@@ -49,6 +71,8 @@ final class GatewayImpl implements Gateway {
   private long requestCounter;
 
   GatewayImpl(Config cfg, String threadName) {
+    nameProvider = new NameProviderImpl();
+    impls = new ImplementationRegistrator(nameProvider);
     operationExecutor = Misc.namedThreadExecutor(ObjectUtils.firstNonNull(threadName, "gateway-main"));
     config = cfg;
     factory = new ConnectionFactory();
@@ -67,9 +91,9 @@ final class GatewayImpl implements Gateway {
   }
 
   @Override
-  public <T> void registerImplementation(Class<T> iface, T impl) throws BadInterface {
+  public <T> void registerImplementation(Class<T> iface, T impl, Executor ex) throws BadInterface {
     checkIfaceIsAcceptable(iface);
-    runExceptional(() -> registerImpl(iface, impl));
+    run(() -> registerImpl(iface, impl, ex));
   }
 
   @Override
@@ -78,44 +102,40 @@ final class GatewayImpl implements Gateway {
     checkIfaceIsAcceptable(iface);
     Map<Method, Map.Entry<String, Class<?>>> methodDescriptors = new HashMap<>();
     for (Method method : iface.getMethods()) {
-      methodDescriptors.put(method, Misc.makePair(fullName(method), method.getReturnType()));
+      methodDescriptors.put(method, Misc.makePair(nameProvider.getName(method), method.getReturnType()));
     }
-    String iName = ifaceName(iface);
+    String ifaceName = nameProvider.getName(iface);
     Serializer serial = config.serializer;
-    boolean oneWay = isEventInterface(iface);
     return (T) Proxy.newProxyInstance(
         iface.getClassLoader(), new Class[]{iface},
         (Object proxy, Method method, Object[] args) -> {
           Map.Entry<String, Class<?>> descriptor = methodDescriptors.get(method);
           if (descriptor == null) {
-            throw new BadInvocation(String.format("Interface %s has no %s method", iName, method.getName()));
+            throw new BadInvocation(String.format("Interface %s has no %s method", ifaceName, method.getName()));
           }
-          if (oneWay) {
-            invokeRemoteOneWay(iName, descriptor.getKey(), serial.serialize(args));
+          if (isEventInterface(iface)) {
+            invokeRemoteOneWay(ifaceName, descriptor.getKey(), serial.serialize(args));
             return null;
           }
           return serial.deserialize(
-            descriptor.getValue(), invokeRemote(iName, descriptor.getKey(), serial.serialize(args)).get());
+            descriptor.getValue(), invokeRemote(ifaceName, descriptor.getKey(), serial.serialize(args)).get());
         });
   }
 
   @Override
   public void reconnect() {
-    runExceptional(this::reconnectImpl);
+    run(this::reconnectImpl);
   }
 
-  private void runExceptional(RunnableWithException operation) {
-    run(() -> {
+  @SuppressWarnings("java:S1181")
+  private void run(RunnableWithException operation) {
+    operationExecutor.execute(() -> {
       try {
         operation.run();
-      } catch (Exception e) {
+      } catch (Throwable e) {
         LOG.error("Exception", e);
       }
     });
-  }
-
-  private void run(Runnable operation) {
-    operationExecutor.execute(operation);
   }
 
   private void reconnectImpl() throws Exception {
@@ -185,26 +205,10 @@ final class GatewayImpl implements Gateway {
     ownQueue = null;
   }
 
-  private void registerImpl(Class<?> iface, Object impl) throws BadInterface, IOException {
-    String iName = ifaceName(iface);
-    LOG.info("Registering {} as {}", impl.getClass(), iName);
-    Map<Map.Entry<String, String>, FunctionWithException<byte[], Object>> ifaceImpls = new HashMap<>();
-    Serializer serial = config.serializer;
-    for (Method method : iface.getMethods()) {
-      String name = fullName(method);
-      LOG.debug("Registering {} of {}", name, iName);
-      if (impls.get(Misc.makePair(iName, name)) != null) {
-        throw new BadInterface(String.format("Duplicate implementation of %s %s", iName, name));
-      }
-      final Class<?>[] cls = method.getParameterTypes();
-      ifaceImpls.put(Misc.makePair(iName, name), (byte[] data) -> {
-        return method.invoke(impl, serial.deserialize(cls, data));
-      });
-    }
-    impls.putAll(ifaceImpls);
-
+  private void registerImpl(Class<?> iface, Object impl, Executor ex) throws BadInterface, IOException {
+    impls.register(iface, impl, ex);
     if (channel != null) {
-      channel.queueBind(ownQueue, REQUEST_EXCHANGE, ifaceName(iface));
+      channel.queueBind(ownQueue, REQUEST_EXCHANGE, nameProvider.getName(iface));
     }
   }
 
@@ -223,26 +227,30 @@ final class GatewayImpl implements Gateway {
 
   private void invokeRemoteOneWay(String ifaceName, String methodName, byte[] args) {
     LOG.debug("invokeRemoteOneWay {} on {}", methodName, ifaceName);
-    runExceptional(() -> {
+    run(() -> {
       if (channel != null) {
         sendRequest(null, ifaceName, methodName, args);
       }
     });
   }
 
+  @SuppressWarnings("java:S1181")
   private void handleRequest(String ifaceName, String methodName, byte[] body, String msgId, String replyTo) {
     LOG.debug(
         "handleRequest iface={}, method={}, msgId={}, replyTo={} body_length={}", 
         ifaceName, methodName, msgId, replyTo, body.length);
-    config.executor.execute(() -> {
+    ImplementationRegistrator.MethodDescriptor methodDescr = impls.get(ifaceName, methodName);
+    Serializer serial = config.serializer;
+    methodDescr.target.executor.execute(() -> {
       // TODO: send response in case of exception
       try {
-        Object result = impls.get(Misc.makePair(ifaceName, methodName)).apply(body);
+        Object[] args = serial.deserialize(methodDescr.method.getParameterTypes(), body);
+        Object result = methodDescr.method.invoke(methodDescr.target.obj, args);
         if (replyTo != null) {
-          byte[] response = config.serializer.serialize(result);
-          runExceptional(() -> sendResponseImpl(replyTo, msgId, response));
+          byte[] response = serial.serialize(result);
+          run(() -> sendResponseImpl(replyTo, msgId, response));
         }
-      } catch (Exception e) {
+      } catch (Throwable e) {
         LOG.error(String.format("Exception on %s %s", ifaceName, methodName), e);
       }
     });
@@ -306,22 +314,5 @@ final class GatewayImpl implements Gateway {
 
   private static boolean isEventInterface(Class<?> iface) {
     return iface.getAnnotation(EventInterface.class) != null;
-  }
-
-  private static String fullName(Method method) {
-    StringBuilder builder = new StringBuilder();
-    builder.append(method.getName());
-    builder.append("#");
-    Checksum crc32 = new CRC32C();
-    crc32.update(method.getReturnType().getCanonicalName().getBytes());
-    for (Class<?> p : method.getParameterTypes()) {
-      crc32.update(p.getCanonicalName().getBytes());
-    }
-    builder.append(crc32.getValue());
-    return builder.toString();
-  }
-
-  private static String ifaceName(Class<?> iface) {
-    return iface.getCanonicalName();
   }
 }

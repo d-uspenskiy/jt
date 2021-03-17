@@ -1,56 +1,45 @@
 package com.duspensky.jutils.rmqrmi;
 
-import java.util.concurrent.Executor;
-
 import org.apache.commons.lang3.Validate;
 
 public final class GatewayBuilder {
-  private String host_ = "localhost";
-  private int port_ = 5672;
-  private String vHost_ = "/";
-  private Executor executor_;
-  private Serializer serializer_;
-  private Corellator corellator_;
-  private String mainThreadName_;
+  private String host = "localhost";
+  private int port = 5672;
+  private String vHost = "/";
+  private Serializer serializer;
+  private Corellator corellator;
+  private String mainThreadName;
 
-  public GatewayBuilder setHost(String host) {
-    this.host_ = Validate.notNull(host);
+  public GatewayBuilder(Serializer s) {
+    serializer = Validate.notNull(s);
+  }
+
+  public GatewayBuilder setHost(String h) {
+    host = Validate.notNull(h);
     return this;
   }
 
-  public GatewayBuilder setPort(int port) {
-    this.port_ = port;
+  public GatewayBuilder setPort(int p) {
+    port = p;
     return this;
   }
 
-  public GatewayBuilder setVHost(String vHost) {
-    this.vHost_ = Validate.notNull(vHost);
+  public GatewayBuilder setVHost(String vH) {
+    vHost = Validate.notNull(vH);
     return this;
   }
 
-  public GatewayBuilder setExecutor(Executor executor) {
-    this.executor_ = Validate.notNull(executor);
-    return this;
-  }
-
-  public GatewayBuilder setSerializer(Serializer serializer) {
-    this.serializer_ = Validate.notNull(serializer);
-    return this;
-  }
-
-  public GatewayBuilder setCorellator(Corellator corellator) {
-    this.corellator_ = corellator;
+  public GatewayBuilder setCorellator(Corellator c) {
+    corellator = c;
     return this;
   }
 
   public GatewayBuilder setMainThreadName(String threadName) {
-    this.mainThreadName_ = threadName;
+    this.mainThreadName = threadName;
     return this;
   }
 
   public Gateway build() {
-    return new GatewayImpl(
-        new Config(host_, port_, vHost_, Validate.notNull(executor_), Validate.notNull(serializer_), corellator_),
-        mainThreadName_);
+    return new GatewayImpl(new Config(host, port, vHost, serializer, corellator), mainThreadName);
   }
 }

@@ -20,6 +20,7 @@ public class Misc {
     void run() throws Exception;
   }
 
+  @SuppressWarnings("java:S108")
   public static void silentClose(AutoCloseable closable) {
     if (closable != null) {
       try {
