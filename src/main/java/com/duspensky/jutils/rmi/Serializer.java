@@ -1,6 +1,6 @@
-package com.duspensky.jutils.rmqrmi;
+package com.duspensky.jutils.rmi;
 
-import com.duspensky.jutils.rmqrmi.Exceptions.BadSerialization;
+import com.duspensky.jutils.rmi.Exceptions.BadSerialization;
 
 public interface Serializer {
   byte[] serialize(Object[] objs) throws BadSerialization;

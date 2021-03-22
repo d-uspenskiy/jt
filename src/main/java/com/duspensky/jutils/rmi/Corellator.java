@@ -1,4 +1,4 @@
-package com.duspensky.jutils.rmqrmi;
+package com.duspensky.jutils.rmi;
 
 public interface Corellator {
   String getCorrelationId();

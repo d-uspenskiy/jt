@@ -10,8 +10,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 public class Misc {
-  private Misc() {}
-
   public interface FunctionWithException<T, R> {
     R apply(T arg) throws Exception;
   }
@@ -53,4 +51,10 @@ public class Misc {
   public static ExecutorService namedThreadExecutor(String threadName) {
     return Executors.newSingleThreadExecutor(r -> new Thread(r, threadName));
   }
+
+  public static <T extends AutoCloseable> CloseableHolder<T> closeableHolder(T closeable) {
+    return new CloseableHolder<>(closeable);
+  }
+
+  private Misc() {}
 }

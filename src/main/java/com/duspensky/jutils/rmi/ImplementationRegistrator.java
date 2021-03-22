@@ -1,4 +1,4 @@
-package com.duspensky.jutils.rmqrmi;
+package com.duspensky.jutils.rmi;
 
 import java.lang.reflect.Method;
 import java.util.HashMap;
@@ -6,7 +6,7 @@ import java.util.Map;
 import java.util.concurrent.Executor;
 
 import com.duspensky.jutils.common.Misc;
-import com.duspensky.jutils.rmqrmi.Exceptions.BadInterface;
+import com.duspensky.jutils.rmi.Exceptions.BadInterface;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

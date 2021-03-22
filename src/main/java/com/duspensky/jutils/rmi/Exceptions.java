@@ -1,4 +1,4 @@
-package com.duspensky.jutils.rmqrmi;
+package com.duspensky.jutils.rmi;
 
 public interface Exceptions {
 
@@ -16,6 +16,8 @@ public interface Exceptions {
     private static final long serialVersionUID = 6584605744637459610L;
 
     public BadInterface(String message) { super(message); }
+
+    public BadInterface(String message, Throwable cause) { super(message, cause); }
   }
 
   public static class BadInvocation extends Common {

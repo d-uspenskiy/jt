@@ -1,8 +1,8 @@
-package com.duspensky.jutils.rmqrmi;
+package com.duspensky.jutils.rmi;
 
 import java.util.concurrent.Executor;
 
-import com.duspensky.jutils.rmqrmi.Exceptions.BadInterface;
+import com.duspensky.jutils.rmi.Exceptions.BadInterface;
 
 public interface Gateway extends AutoCloseable {
   <T> void registerImplementation(Class<T> cl, T impl, Executor executor) throws BadInterface;

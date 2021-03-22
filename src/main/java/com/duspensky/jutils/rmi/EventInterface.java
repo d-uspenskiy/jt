@@ -1,4 +1,4 @@
-package com.duspensky.jutils.rmqrmi;
+package com.duspensky.jutils.rmi;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
