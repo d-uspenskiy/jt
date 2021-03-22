@@ -6,8 +6,8 @@ import org.apache.commons.lang3.Validate;
 
 public final class GatewayFactory {
   public Gateway build(
-    TransportFactory transport, Serializer serializer, Corellator corellator, String mainThreadName, long timeoutMs) {
+      TransportFactory transport, Serializer serializer, Corellator corellator, String mainThreadName, long timeoutMs) {
     return new GatewayImpl(
-      Validate.notNull(transport), Validate.notNull(serializer), mainThreadName, corellator, timeoutMs);
+        Validate.notNull(transport), Validate.notNull(serializer), mainThreadName, corellator, timeoutMs);
   }
 }

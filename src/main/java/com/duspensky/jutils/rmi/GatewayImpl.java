@@ -147,7 +147,7 @@ class GatewayImpl implements Gateway, Processor {
       String ifaceName, String methodName, Object[] args, Class<?> returnType)
       throws BadSerialization, InterruptedException, ExecutionException, TimeoutException {
     LOG.debug("invokeRemote {} on {}", methodName, ifaceName);
-    byte[] data = serializer.serialize(args);
+    var data = serializer.serialize(args);
     if (returnType != null) {
       var future = new CompletableFuture<byte[]> ();
       run(() -> transport.send(ifaceName, methodName, data, reply -> {
@@ -193,8 +193,8 @@ class GatewayImpl implements Gateway, Processor {
       throw new BadInterface(String.format("'%s' is not the public accessed interface", iface.getCanonicalName()));
     }
     if (isEventInterface(iface)) {
-      for (Method method : iface.getMethods()) {
-        Class<?> rt = method.getReturnType();
+      for (var method : iface.getMethods()) {
+        var rt = method.getReturnType();
         if (!(rt.equals(Void.class) || rt.equals(void.class))) {
           throw new BadInterface(String.format(
               "event interface '%s' has non void method '%s'", iface.getCanonicalName(), method.getName()));

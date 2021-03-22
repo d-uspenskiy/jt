@@ -47,14 +47,14 @@ class ImplementationRegistrator {
   }
 
   public void register(Class<?> iface, Object impl, Executor ex) throws BadInterface {
-    String ifaceName = nameProvider.getName(iface);
+    var ifaceName = nameProvider.getName(iface);
     LOG.info("Registering {} as {}", impl.getClass(), ifaceName);
-    Map<Map.Entry<String, String>, MethodDescriptor> ifaceMethods = new HashMap<>();
-    TargetDescriptor targetDescr = new TargetDescriptor(impl, ex);
-    for (Method method : iface.getMethods()) {
-      String methodName = nameProvider.getName(method);
+    var ifaceMethods = new HashMap<Map.Entry<String, String>, MethodDescriptor>();
+    var targetDescr = new TargetDescriptor(impl, ex);
+    for (var method : iface.getMethods()) {
+      var methodName = nameProvider.getName(method);
       LOG.debug("Registering {} of {}", methodName, ifaceName);
-      Map.Entry<String, String> key = Misc.makePair(ifaceName, methodName);
+      var key = Misc.makePair(ifaceName, methodName);
       if (methods.get(key) != null) {
         throw new BadInterface(String.format("Duplicate implementation of %s %s", ifaceName, methodName));
       }

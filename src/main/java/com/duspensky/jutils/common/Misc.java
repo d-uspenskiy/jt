@@ -43,7 +43,7 @@ public class Misc {
   }
 
   public static void waitAllOperationsProcessed(Executor exec) throws InterruptedException, ExecutionException {
-    CompletableFuture<Void> completeOperation = new CompletableFuture<>();
+    var completeOperation = new CompletableFuture<Void>();
     exec.execute(() -> completeOperation.complete(null));
     completeOperation.get();
   }

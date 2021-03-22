@@ -27,6 +27,6 @@ public class TransportFactoryRMQ implements TransportFactory {
 
   @Override
   public Transport build(Processor processor, ExecutorService executor) {
-    return new TransportImpl(new Config(host, port, vHost, Validate.notNull(executor), Validate.notNull(processor)));
+    return new TransportImpl(host, port, vHost, Validate.notNull(executor), Validate.notNull(processor));
   }
 }

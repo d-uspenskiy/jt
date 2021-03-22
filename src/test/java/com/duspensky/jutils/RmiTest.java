@@ -45,21 +45,22 @@ public class RmiTest {
 
     @Override
     public void subscribe(String topic) throws BadTopic {
-      if (!subscriptions.add(topic))
+      if (!subscriptions.add(topic)) {
         throw new BadTopic("Existing topic");
+      }
     }
 
     @Override
     public void unsubscribe(String topic) throws BadTopic {
-      if (!subscriptions.remove(topic))
+      if (!subscriptions.remove(topic)) {
         throw new BadTopic("Unknown topic");
+      }
     }
 
     @Override
     public void send(String topic, String subTopic, byte[] data, Consumer<Reply> consumer) {
-      executor.execute(() -> {
-        processor.onMessage(topic, subTopic, data, response -> consumer.accept(new Reply(response, null)));
-      });
+      executor.execute(() ->
+        processor.onMessage(topic, subTopic, data, response -> consumer.accept(new Reply(response, null))));
     }
 
     @Override
@@ -68,6 +69,7 @@ public class RmiTest {
 
     @Override
     public void deactivate() {
+      LOG.debug("BasicTransport deactivate");
     }
   }
 

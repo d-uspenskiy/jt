@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
 
 import com.duspensky.jutils.rmi.transport.Exceptions.BadTopic;
@@ -38,13 +39,13 @@ class TransportImpl implements Transport, com.rabbitmq.client.Consumer {
   private String ownQueue;
   private int nextRequestId;
 
-  public TransportImpl(Config config) {
-    messageProcessor = config.processor;
+  public TransportImpl(String host, int port, String vHost, ExecutorService executor, Processor processor) {
+    messageProcessor = processor;
     factory = new ConnectionFactory();
-    factory.setHost(config.host);
-    factory.setPort(config.port);
-    factory.setVirtualHost(config.vHost);
-    factory.setSharedExecutor(config.executor);
+    factory.setHost(host);
+    factory.setPort(port);
+    factory.setVirtualHost(vHost);
+    factory.setSharedExecutor(executor);
   }
 
   @Override
@@ -185,8 +186,8 @@ class TransportImpl implements Transport, com.rabbitmq.client.Consumer {
   private void activateImpl() throws Exception {
     try (var connectionHolder = Misc.closeableHolder(factory.newConnection());
          var channelHolder = Misc.closeableHolder(connectionHolder.get().createChannel())) {
-      Channel ch = channelHolder.get();
-      String queue = ch.queueDeclare().getQueue();
+      var ch = channelHolder.get();
+      var queue = ch.queueDeclare().getQueue();
       ch.exchangeDeclare(EXCHANGE_REQUEST, BuiltinExchangeType.DIRECT);
       ch.basicConsume(queue, this);
       subscribeAll();

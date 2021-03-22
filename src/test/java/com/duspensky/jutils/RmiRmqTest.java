@@ -76,9 +76,9 @@ public class RmiRmqTest {
       gwHelper.registrator.register(Operations.class, new OperationsImpl());
       gwHelper.registrator.register(Notification.class, new NotificationImpl(gwResult));
       extraGwHelper.registrator.register(Notification.class, new NotificationImpl(extraGwResult));
-      Operations opService = gwHelper.gateway.buildClient(Operations.class);
-      Notification ntfService = gwHelper.gateway.buildClient(Notification.class);
-      Consumer<Map.Entry<Integer,Integer>> resultForwarder = (val) -> {
+      var opService = gwHelper.gateway.buildClient(Operations.class);
+      var ntfService = gwHelper.gateway.buildClient(Notification.class);
+      Consumer<Map.Entry<Integer,Integer>> resultForwarder = val -> {
         assertEquals(val.getKey(), val.getValue());
         ntfService.onNewResult(val.getKey());
       };

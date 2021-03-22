@@ -12,8 +12,9 @@ public class Reply {
   }
 
   public byte[] getData() throws BaseException {
-    if (exception != null)
+    if (exception != null) {
       throw exception;
+    }
     return data;
   }
 }

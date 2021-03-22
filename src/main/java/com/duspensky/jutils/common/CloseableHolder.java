@@ -12,7 +12,7 @@ public class CloseableHolder<T extends AutoCloseable> implements AutoCloseable {
   }
 
   public T release() {
-    T result = closeable;
+    var result = closeable;
     closeable = null;
     return result;
   }

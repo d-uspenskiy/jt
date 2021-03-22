@@ -15,8 +15,12 @@ import com.duspensky.jutils.rmi.Exceptions.BadSerialization;
 import com.duspensky.jutils.rmi.transport.TransportFactory;
 
 import org.apache.commons.lang3.Validate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 class TestUtils {
+  private static final Logger LOG = LoggerFactory.getLogger(TestUtils.class);
+
   private static final String GATEWAY_MAIN_THREAD_NAME = "gateway-main";
   private static final String GATEWAY_WORKER_THREAD_NAME = "gateway-warker";
 
@@ -99,6 +103,7 @@ class TestUtils {
 
     @Override
     public void close() throws Exception {
+      LOG.debug("GatewayHelper close");
       registrator.close();
       gateway.close();
     }
@@ -187,5 +192,6 @@ class TestUtils {
       }
     };
   }
+
   private TestUtils() {}
 }
